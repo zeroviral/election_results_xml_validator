@@ -722,32 +722,41 @@ class UniqueLabel(base.BaseRule):
 
 class ReusedCandidate(base.TreeRule):
     """Candidate should be referred to by only one contest.
-
+ 
     A Candidate object should only ever be referenced from one contest. If a
     Person is running in multiple Contests, then that Person is a Candidate
     several times over, but a Candida(te|cy) can't span contests.
     """
     seen_candidates = {} # mapping of candidates and candidate selections
-
+    cand_has_mult_contests = {} # any candidate object with multiple contests, maps relevant contests
+    get_sourceline = {} # store the line of which any candidate ID has first appeared
+    error_list = [] # holds objects of type base.ErrorLogEntry and is returned for multiple contests per candidate ID.
+ 
     def check(self):
-        candidate_selections = self.get_elements_by_class(
-            self.election_tree, "CandidateSelection")
-        for candidate_selection in candidate_selections:
+    	candidate_selections = self.get_elements_by_class(
+    	self.election_tree, "CandidateSelection")
+    	for candidate_selection in candidate_selections:
             candidate_selection_id = candidate_selection.get("objectId", None)
             candidate_ids = candidate_selection.find("CandidateIds")
-            if candidate_ids is None:
+	    if candidate_ids is None:
                 break
+	    if candidate_ids.text not in self.get_sourceline:
+	    	self.get_sourceline[candidate_ids.text] = candidate_ids.sourceline
             for candidate_id in candidate_ids.text.split():
-                if candidate_selection_id:
-                    self.seen_candidates.setdefault(
-                        candidate_id, []).append(candidate_selection_id)
-        for cand_id, cand_select_ids in self.seen_candidates.iteritems():
-            if len(cand_select_ids) > 1:
-                raise base.ElectionError(
-                    "A Candidate object should only ever be referenced from one"
-                    " CandidateSelection. Candidate %s is referenced by the"
-                    " following CandidateSelections :- %s" % (
-                        cand_id, ", ".join(cand_select_ids)))
+                if candidate_selection_id != "":
+                    self.seen_candidates.setdefault(candidate_id, []).append(candidate_selection_id)
+	for cand_id, cand_select_ids in self.seen_candidates.iteritems():
+	    if len(cand_select_ids) > 1:
+                self.cand_has_mult_contests[cand_id] = cand_select_ids
+       	if self.cand_has_mult_contests:
+	    for candidate, contest_list in self.cand_has_mult_contests.items():
+		error_message = ("A Candidate object should only ever be referenced from one"
+                    		" CandidateSelection. Candidate %s is referenced by the"
+                    		" following CandidateSelections: %s" % (candidate, ", ".join(contest_list)))
+		if candidate not in self.get_sourceline:
+		    continue
+		self.error_list.append(base.ErrorLogEntry(self.get_sourceline[candidate], error_message))
+	    raise base.ElectionTreeError("Error: ", self.error_list)
 
 # To add new rules, create a new class, inherit the base rule
 # then add it to this list
